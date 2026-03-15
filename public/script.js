@@ -72,8 +72,62 @@ let isStartingGame = false;
 let lastFrameTime = null;
 let pendingFlap = false;
 let smoothedDeltaSeconds = 1 / 60;
+let hasFetchedHighScoreOnGameOver = false;
 const MAX_FRAME_DELTA_SECONDS = 1 / 30;
 const DELTA_SMOOTHING_FACTOR = 0.15;
+const MAX_BIRD_TILT_DEGREES = 30;
+const MAX_BIRD_FALL_SPEED_FOR_TILT = 450;
+
+function getCanvasPointerPosition(clientX, clientY) {
+    const rect = board.getBoundingClientRect();
+    const scaleX = board.width / rect.width;
+    const scaleY = board.height / rect.height;
+
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+function isInsidePlayButton(x, y) {
+    return (
+        x >= playButton.x &&
+        x <= playButton.x + playButton.width &&
+        y >= playButton.y &&
+        y <= playButton.y + playButton.height
+    );
+}
+
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+
+function getBirdRotationRadians() {
+    const normalizedVelocity = clamp(
+        velocityY / MAX_BIRD_FALL_SPEED_FOR_TILT,
+        -1,
+        1
+    );
+    const angleDegrees = normalizedVelocity * MAX_BIRD_TILT_DEGREES;
+    return angleDegrees * (Math.PI / 180);
+}
+
+function drawBird() {
+    const centerX = bird.x + bird.width / 2;
+    const centerY = bird.y + bird.height / 2;
+
+    context.save();
+    context.translate(centerX, centerY);
+    context.rotate(getBirdRotationRadians());
+    context.drawImage(
+        birdImg,
+        -bird.width / 2,
+        -bird.height / 2,
+        bird.width,
+        bird.height
+    );
+    context.restore();
+}
 
 function resizeBoard() {
     const previousWidth = boardWidth;
@@ -342,7 +396,7 @@ function updateGame(deltaSeconds) {
 }
 
 function renderGame() {
-    context.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+    drawBird();
 
     for (let i = 0; i < pipeArray.length; i++) {
         let pipe = pipeArray[i];
@@ -357,6 +411,11 @@ function renderGame() {
 
 function renderGameOver() {
     if (gameOverImg.complete) {
+        if (!hasFetchedHighScoreOnGameOver) {
+            hasFetchedHighScoreOnGameOver = true;
+            fetchHighScore();
+        }
+
         let imgWidth = 400;
         let imgHeight = 80;
         let x = (boardWidth - imgWidth) / 2;
@@ -413,6 +472,7 @@ function enterGameOverState() {
     currentState = GAME_STATE.GAME_OVER;
     gameEndedAt = Date.now();
     pendingFlap = false;
+    hasFetchedHighScoreOnGameOver = false;
 
     if (pipeIntervalId) {
         clearInterval(pipeIntervalId);
@@ -449,6 +509,7 @@ async function startGame() {
     previousGapCenterY = null;
     gameStartedAt = Date.now();
     gameEndedAt = null;
+    hasFetchedHighScoreOnGameOver = false;
 
     if (pipeIntervalId) {
         clearInterval(pipeIntervalId);
@@ -471,6 +532,7 @@ function resetGame() {
     lastFrameTime = null;
     pendingFlap = false;
     smoothedDeltaSeconds = 1 / 60;
+    hasFetchedHighScoreOnGameOver = false;
 
     if (pipeIntervalId) {
         clearInterval(pipeIntervalId);
@@ -518,8 +580,8 @@ function showNewRecordForm() {
     container.innerHTML = `
         <h3>🎉 New Record!</h3>
         <p>Score: ${Math.floor(score)}</p>
-        <input type="text" id="record-name" placeholder="Your name"/><br/><br/>
-        <input type="text" id="record-id" placeholder="Your ID"/><br/><br/>
+        <input type="text" id="record-name" placeholder="Name"/><br/><br/>
+        <input type="text" id="record-id" placeholder="Cedula"/><br/><br/>
         <button id="submit-record">Submit</button>
     `;
 

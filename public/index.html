@@ -40,7 +40,12 @@
         if (touchLocked) return;
 
         if (currentState === GAME_STATE.MENU) {
-          startGame();
+          const touch = e.touches[0];
+          const { x, y } = getCanvasPointerPosition(touch.clientX, touch.clientY);
+
+          if (isInsidePlayButton(x, y)) {
+            startGame();
+          }
         } else if (currentState === GAME_STATE.GAME_OVER && !formVisible) {
           resetGame();
           currentState = GAME_STATE.MENU;
