@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Flappy Sunny</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="board"></canvas>
+
+  <script>
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const canvas = document.getElementById("board");
+
+      // Clic en el canvas para activar botón de play
+      canvas.addEventListener("click", (e) => {
+        if (typeof playButton === "undefined" || currentState !== GAME_STATE.MENU) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
+
+        if (
+          x >= playButton.x &&
+          x <= playButton.x + playButton.width &&
+          y >= playButton.y &&
+          y <= playButton.y + playButton.height
+        ) {
+          startGame();
+        }
+      });
+
+      // Toque para dispositivos móviles
+      canvas.addEventListener("touchstart", (e) => {
+        if (touchLocked) return;
+
+        if (currentState === GAME_STATE.MENU) {
+          startGame();
+        } else if (currentState === GAME_STATE.GAME_OVER && !formVisible) {
+          resetGame();
+          currentState = GAME_STATE.MENU;
+        } else if (currentState === GAME_STATE.PLAYING) {
+          velocityY = -6;
+        }
+        e.preventDefault();
+      });
+    });
+  </script>
+
+  <script src="script.js"></script>
+</body>
+</html>
