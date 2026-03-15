@@ -13,8 +13,7 @@ let touchLocked = false;
 let board;
 let context;
 let birdImg;
-let topPipeImg;
-let bottomPipeImg;
+let pipeImages;
 let playButtonImg;
 
 let score = 0;
@@ -58,11 +57,23 @@ let bird = {
 let velocityY = 0;
 let velocityX = -3.5;
 let gravity = 0.3;
+let flapStrength = 6;
 let birdY = boardHeight / 2;
 let pipeWidth = 35;
 let pipeGap = 150;
 let pipeArray = [];
 let pipeIntervalId;
+let previousGapCenterY = null;
+let maxGapShift = 400;
+let gameStartedAt = null;
+let gameEndedAt = null;
+let gameSessionId = null;
+let isStartingGame = false;
+let lastFrameTime = null;
+let pendingFlap = false;
+let smoothedDeltaSeconds = 1 / 60;
+const MAX_FRAME_DELTA_SECONDS = 1 / 30;
+const DELTA_SMOOTHING_FACTOR = 0.15;
 
 function resizeBoard() {
     const previousWidth = boardWidth;
@@ -102,8 +113,9 @@ function resizeBoard() {
         bird.y = birdY;
     }
 
-    velocityX = -3.5 * scale;
-    gravity = 0.3 * scale;
+    velocityX = -210 * scale;
+    gravity = 1080 * scale;
+    flapStrength = 360 * scale;
     velocityY *= heightRatio;
     pipeWidth = 35 * scale;
     pipeGap = 150 * scale;
@@ -128,17 +140,50 @@ function placePipes() {
     createPipes();
 }
 
+function getPipeVariantByHeight(height, maxHeight, variants) {
+    const ratio = maxHeight > 0 ? height / maxHeight : 0;
+
+    if (ratio > 0.66) {
+        return variants.large;
+    }
+
+    if (ratio > 0.33) {
+        return variants.medium;
+    }
+
+    return variants.small;
+}
+
 function createPipes() {
     let maxTopPipeHeight = boardHeight - pipeGap - 50;
-    let topPipeHeight = Math.floor(Math.random() * maxTopPipeHeight);
+    let minTopPipeHeight = 50;
+    let topPipeHeight;
+
+    if (previousGapCenterY === null) {
+        topPipeHeight = Math.floor(Math.random() * (maxTopPipeHeight - minTopPipeHeight + 1)) + minTopPipeHeight;
+    } else {
+        const minGapCenterY = minTopPipeHeight + pipeGap / 2;
+        const maxGapCenterY = boardHeight - 50 - pipeGap / 2;
+        const minAllowedGapCenterY = Math.max(minGapCenterY, previousGapCenterY - maxGapShift);
+        const maxAllowedGapCenterY = Math.min(maxGapCenterY, previousGapCenterY + maxGapShift);
+        const nextGapCenterY = Math.random() * (maxAllowedGapCenterY - minAllowedGapCenterY) + minAllowedGapCenterY;
+
+        topPipeHeight = Math.round(nextGapCenterY - pipeGap / 2);
+    }
+
     let bottomPipeHeight = boardHeight - topPipeHeight - pipeGap;
+    let maxBottomPipeHeight = maxTopPipeHeight;
+    previousGapCenterY = topPipeHeight + pipeGap / 2;
+
+    let topPipeImage = getPipeVariantByHeight(topPipeHeight, maxTopPipeHeight, pipeImages.top);
+    let bottomPipeImage = getPipeVariantByHeight(bottomPipeHeight, maxBottomPipeHeight, pipeImages.bottom);
 
     let topPipe = {
         x: boardWidth,
         y: 0,
         width: pipeWidth,
         height: topPipeHeight,
-        img: topPipeImg,
+        img: topPipeImage,
         passed: false
     };
 
@@ -147,7 +192,7 @@ function createPipes() {
         y: topPipeHeight + pipeGap,
         width: pipeWidth,
         height: bottomPipeHeight,
-        img: bottomPipeImg,
+        img: bottomPipeImage,
         passed: false
     };
     pipeArray.push(topPipe, bottomPipe);
@@ -161,11 +206,24 @@ window.onload = async function () {
     birdImg = new Image();
     birdImg.src = "./Images/Sunny.png";
 
-    topPipeImg = new Image();
-    topPipeImg.src = "./Images/TroncoArriba.png";
-
-    bottomPipeImg = new Image();
-    bottomPipeImg.src = "./Images/TroncoAbajo.png";
+    pipeImages = {
+        top: {
+            small: new Image(),
+            medium: new Image(),
+            large: new Image()
+        },
+        bottom: {
+            small: new Image(),
+            medium: new Image(),
+            large: new Image()
+        }
+    };
+    pipeImages.top.small.src = "./Images/TroncoArriba.png";
+    pipeImages.top.medium.src = "./Images/TroncoArribaM.png";
+    pipeImages.top.large.src = "./Images/TroncoArribaL.png";
+    pipeImages.bottom.small.src = "./Images/TroncoAbajo.png";
+    pipeImages.bottom.medium.src = "./Images/TroncoAbajoM.png";
+    pipeImages.bottom.large.src = "./Images/TroncoAbajoL.png";
 
     playButtonImg = new Image();
     playButtonImg.src = "./Images/flappyBirdPlayButton.png";
@@ -186,13 +244,36 @@ async function fetchHighScore() {
     }
 }
 
-function update() {
+async function createGameSession() {
+    const res = await fetch("/game/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+    });
+
+    if (!res.ok) {
+        throw new Error("Failed to create game session.");
+    }
+
+    const data = await res.json();
+    gameSessionId = data.sessionId;
+}
+
+function update(timestamp) {
     requestAnimationFrame(update);
+    if (lastFrameTime === null) {
+        lastFrameTime = timestamp;
+    }
+
+    const rawDeltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, MAX_FRAME_DELTA_SECONDS);
+    lastFrameTime = timestamp;
+    smoothedDeltaSeconds += (rawDeltaSeconds - smoothedDeltaSeconds) * DELTA_SMOOTHING_FACTOR;
+
     context.clearRect(0, 0, board.width, board.height);
 
     if (currentState === GAME_STATE.MENU) {
         renderMenu();
     } else if (currentState === GAME_STATE.PLAYING) {
+        updateGame(smoothedDeltaSeconds);
         renderGame();
     } else if (currentState === GAME_STATE.GAME_OVER) {
         renderGameOver();
@@ -222,20 +303,27 @@ function renderMenu() {
     }
 }
 
-function renderGame() {
-    velocityY += gravity;
-    bird.y = Math.max(bird.y + velocityY, 0);
-    context.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+function updateGame(deltaSeconds) {
+    if (currentState !== GAME_STATE.PLAYING) {
+        return;
+    }
+
+    if (pendingFlap) {
+        velocityY = -flapStrength;
+        pendingFlap = false;
+    }
+
+    velocityY += gravity * deltaSeconds;
+    bird.y = Math.max(bird.y + velocityY * deltaSeconds, 0);
 
     if (bird.y > board.height) {
-        currentState = GAME_STATE.GAME_OVER;
+        enterGameOverState();
+        return;
     }
 
     for (let i = 0; i < pipeArray.length; i++) {
         let pipe = pipeArray[i];
-        pipe.x += velocityX;
-
-        context.drawImage(pipe.img, pipe.x, pipe.y, pipe.width, pipe.height);
+        pipe.x += velocityX * deltaSeconds;
 
         if (!pipe.passed && bird.x > pipe.x + pipe.width) {
             score += 0.5;
@@ -243,12 +331,22 @@ function renderGame() {
         }
 
         if (detectCollision(bird, pipe)) {
-            currentState = GAME_STATE.GAME_OVER;
+            enterGameOverState();
+            return;
         }
     }
 
     while (pipeArray.length > 0 && pipeArray[0].x < -pipeWidth) {
         pipeArray.shift();
+    }
+}
+
+function renderGame() {
+    context.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+
+    for (let i = 0; i < pipeArray.length; i++) {
+        let pipe = pipeArray[i];
+        context.drawImage(pipe.img, pipe.x, pipe.y, pipe.width, pipe.height);
     }
 
     context.fillStyle = "white";
@@ -300,27 +398,64 @@ function handleKeyDown(e) {
             resetGame();
             currentState = GAME_STATE.MENU;
         } else if (currentState === GAME_STATE.PLAYING) {
-            velocityY = -6;
+            pendingFlap = true;
         }
     }
 }
 
 document.addEventListener("keydown", handleKeyDown);
 
-function startGame() {
+function enterGameOverState() {
+    if (currentState === GAME_STATE.GAME_OVER) {
+        return;
+    }
+
+    currentState = GAME_STATE.GAME_OVER;
+    gameEndedAt = Date.now();
+    pendingFlap = false;
+
+    if (pipeIntervalId) {
+        clearInterval(pipeIntervalId);
+        pipeIntervalId = null;
+    }
+}
+
+async function startGame() {
+    if (isStartingGame) {
+        return;
+    }
+
+    isStartingGame = true;
+
+    try {
+        await createGameSession();
+    } catch (err) {
+        console.error("Error creating game session:", err);
+        alert("Could not start the game. Please try again.");
+        isStartingGame = false;
+        return;
+    }
+
     currentState = GAME_STATE.PLAYING;
     resizeBoard();
+    lastFrameTime = null;
+    pendingFlap = false;
+    smoothedDeltaSeconds = 1 / 60;
     bird.y = birdY;
     velocityY = 0;
     pipeArray = [];
     score = 0;
     formVisible = false;
+    previousGapCenterY = null;
+    gameStartedAt = Date.now();
+    gameEndedAt = null;
 
     if (pipeIntervalId) {
         clearInterval(pipeIntervalId);
     }
 
     pipeIntervalId = setInterval(placePipes, 1500);
+    isStartingGame = false;
 }
 
 function resetGame() {
@@ -328,8 +463,31 @@ function resetGame() {
     pipeArray = [];
     score = 0;
     formVisible = false;
+    previousGapCenterY = null;
+    gameStartedAt = null;
+    gameEndedAt = null;
+    gameSessionId = null;
+    isStartingGame = false;
+    lastFrameTime = null;
+    pendingFlap = false;
+    smoothedDeltaSeconds = 1 / 60;
+
+    if (pipeIntervalId) {
+        clearInterval(pipeIntervalId);
+        pipeIntervalId = null;
+    }
+
     const form = document.getElementById("record-form");
     if (form) form.remove();
+}
+
+function getGameDurationMs() {
+    if (!gameStartedAt) {
+        return 0;
+    }
+
+    const finishedAt = gameEndedAt || Date.now();
+    return Math.max(0, finishedAt - gameStartedAt);
 }
 
 function deleteForm() {
@@ -379,7 +537,13 @@ function showNewRecordForm() {
             const res = await fetch("/save-record", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, id, score: Math.floor(score) })
+                body: JSON.stringify({
+                    name,
+                    id,
+                    score: Math.floor(score),
+                    durationMs: getGameDurationMs(),
+                    sessionId: gameSessionId
+                })
             });
 
             if (res.ok) {
@@ -390,7 +554,8 @@ function showNewRecordForm() {
                 resetGame();
                 currentState = GAME_STATE.MENU;
             } else {
-                alert("Failed to save record.");
+                const errorData = await res.json().catch(() => null);
+                alert(errorData?.error || "Failed to save record.");
             }
         } catch (err) {
             console.error("Error saving record:", err);

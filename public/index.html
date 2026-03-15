@@ -45,7 +45,7 @@
           resetGame();
           currentState = GAME_STATE.MENU;
         } else if (currentState === GAME_STATE.PLAYING) {
-          velocityY = -6;
+          pendingFlap = true;
         }
         e.preventDefault();
       });

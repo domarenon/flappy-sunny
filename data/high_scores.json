@@ -1,22 +1,9 @@
 {
   "weekly_high_score": {
-    "name": "Daniel Orozco",
-    "id": "1047482574",
-    "score": 63,
-    "date": "2025-09-16T21:44:56.342Z"
-  },
-  "world_record": {
-    "name": "SunnyLegend",
+    "name": "Daniel O",
     "id": "123",
-    "score": 0,
-    "date": "2025-06-07T20:14:55.583Z"
-  },
-  "history": [
-    {
-      "name": "SunnyLegend",
-      "id": "123",
-      "score": 0,
-      "date": "2025-06-07T20:14:55.583Z"
-    }
-  ]
+    "score": 69,
+    "durationMs": 106288,
+    "date": "2026-03-15T16:47:33.537Z"
+  }
 }
